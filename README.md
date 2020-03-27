@@ -20,5 +20,3 @@ https://itonaut.com/2019/02/06/implement-kinesis-firehose-s3-delivery-preprocess
 
 https://itiskj.hatenablog.com/entry/2018/08/28/121536
 
-
-https://stackoverflow.com/questions/44032664/reference-function-from-within-serverless-yml

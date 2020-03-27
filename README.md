@@ -12,3 +12,10 @@ Lambda function defined in `main.go` listens to DynamoDB stream and writes them 
 - DynamoDB
 - Go
 - CloudFormation
+
+### References
+https://serverless.com/framework/docs/providers/aws/events/streams/
+
+https://itonaut.com/2019/02/06/implement-kinesis-firehose-s3-delivery-preprocessed-by-lambda-in-aws-cloudformation/
+
+https://itiskj.hatenablog.com/entry/2018/08/28/121536

@@ -1,6 +1,5 @@
 build: format
 	env GOOS=linux go build -ldflags="-s -w" -o bin/main cmd/main.go
-	env GOOS=linux go build -ldflags="-s -w" -o bin/transform cmd/transform/main.go
 
 format:
 	go fmt ./...

@@ -27,6 +27,8 @@ func handler(ctx context.Context, e events.DynamoDBEvent) {
 			log.Panicln(err)
 		}
 
+		data = append(data, "\n"...) // add new line between records
+
 		rs = append(rs, &firehose.Record{Data: data})
 	}
 

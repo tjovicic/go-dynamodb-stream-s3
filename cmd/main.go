@@ -10,22 +10,21 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/firehose"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/external"
+	"github.com/aws/aws-sdk-go-v2/service/firehose"
 )
-
-var sess = session.Must(session.NewSession())
-var firehoseClient = firehose.New(sess)
 
 const MaxWaitInterval = 100
 const MaxRetries = 3
 
+var firehoseClient = initFirehoseClient()
+
 func handler(ctx context.Context, e events.DynamoDBEvent) {
-	var rs []*firehose.Record
+	var rs []firehose.Record
 
 	for _, r := range e.Records {
-		rs = append(rs, &firehose.Record{Data: eventsToByte(r)})
+		rs = append(rs, firehose.Record{Data: eventsToByte(r)})
 	}
 
 	if len(rs) == 0 {
@@ -33,10 +32,12 @@ func handler(ctx context.Context, e events.DynamoDBEvent) {
 		return
 	}
 
-	out, err := firehoseClient.PutRecordBatch(&firehose.PutRecordBatchInput{
+	req := firehoseClient.PutRecordBatchRequest(&firehose.PutRecordBatchInput{
 		Records:            rs,
 		DeliveryStreamName: aws.String(os.Getenv("STREAM_NAME")),
 	})
+
+	out, err := req.Send(ctx)
 
 	if err != nil {
 		log.Panicln(err)
@@ -48,7 +49,7 @@ func handler(ctx context.Context, e events.DynamoDBEvent) {
 	}
 
 	// retry failed put records
-	if err := retry(out, rs); err != nil {
+	if err := retry(ctx, out, rs); err != nil {
 		log.Panicln(err)
 	}
 
@@ -67,7 +68,7 @@ func eventsToByte(r events.DynamoDBEventRecord) []byte {
 	return data
 }
 
-func retry(out *firehose.PutRecordBatchOutput, rs []*firehose.Record) error {
+func retry(ctx context.Context, out *firehose.PutRecordBatchResponse, rs []firehose.Record) error {
 	retries := 0
 	retry := true
 
@@ -76,17 +77,19 @@ func retry(out *firehose.PutRecordBatchOutput, rs []*firehose.Record) error {
 
 		time.Sleep(time.Duration(waitTime))
 
-		var retryRecords []*firehose.Record
+		var retryRecords []firehose.Record
 		for i, r := range out.RequestResponses {
 			if r.ErrorCode != nil {
 				retryRecords = append(retryRecords, rs[i])
 			}
 		}
 
-		out, err := firehoseClient.PutRecordBatch(&firehose.PutRecordBatchInput{
+		req := firehoseClient.PutRecordBatchRequest(&firehose.PutRecordBatchInput{
 			Records:            retryRecords,
 			DeliveryStreamName: aws.String(os.Getenv("STREAM_NAME")),
 		})
+
+		out, err := req.Send(ctx)
 
 		if err != nil {
 			return err
@@ -113,6 +116,15 @@ func min(a, b int) int {
 func getWaitTimeExp(retryCount int) int {
 	waitTime := math.Pow(2, float64(retryCount)) * 100
 	return int(waitTime)
+}
+
+func initFirehoseClient() *firehose.Client {
+	cfg, err := external.LoadDefaultAWSConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	return firehose.New(cfg)
 }
 
 func main() {

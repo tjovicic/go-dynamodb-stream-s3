@@ -43,6 +43,7 @@ func handler(ctx context.Context, e events.DynamoDBEvent) {
 	}
 
 	if *out.FailedPutCount == 0 {
+		log.Println("success!")
 		return
 	}
 

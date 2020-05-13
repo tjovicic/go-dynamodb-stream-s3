@@ -3,7 +3,7 @@ service: go-dynamodb-stream-s3
 custom:
   dynamodb:
     tableName: users
-    batchSize: 100
+    batchSize: 10
     batchWindow: 10
     startingPosition: LATEST # Process new records that are added to the stream
     maximumRetryAttempts: 10
@@ -12,7 +12,7 @@ custom:
     bufferInterval: 60
     bufferSize: 1
   s3:
-    bucketName: go-metadata-pipeline-test
+    bucketName: go-metadata-pipeline
     path: dynamodb/
 
 provider: 
@@ -65,6 +65,8 @@ functions:
     handler: bin/main
     environment:
       STREAM_NAME: ${self:custom.firehose.deliveryStreamName}
+      DYNAMO_STREAM_ARN:
+        Fn::GetAtt: [DynamoDBTable, StreamArn]
     events:
       - stream:
           type: dynamodb

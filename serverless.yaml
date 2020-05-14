@@ -7,13 +7,23 @@ custom:
     batchWindow: 10
     startingPosition: LATEST # Process new records that are added to the stream
     maximumRetryAttempts: 10
+
   firehose:
-    deliveryStreamName: mystream
+    createDeliveryStreamName: create-stream
+    updateDeliveryStreamName: update-stream
+    deleteDeliveryStreamName: delete-stream
     bufferInterval: 60
     bufferSize: 1
+    prefix:
+      create: "dynamodb/INSERT/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/"
+      update: "dynamodb/MODIFY/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/"
+      delete: "dynamodb/REMOVE/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/"
+    errorPrefix:
+      create: "dynamodb-error/INSERT/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/!{firehose:error-output-type}/"
+      update: "dynamodb-error/MODIFY/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/!{firehose:error-output-type}/"
+      delete: "dynamodb-error/REMOVE/year=!{timestamp:yyyy}/month=!{timestamp:M}/day=!{timestamp:d}/!{firehose:error-output-type}/"
   s3:
     bucketName: go-metadata-pipeline
-    path: dynamodb/
 
 provider: 
   name: aws
@@ -49,7 +59,21 @@ provider:
               - Ref: "AWS::Region"
               - ":"
               - Ref: "AWS::AccountId"
-              - ":deliverystream/${self:custom.firehose.deliveryStreamName}"
+              - ":deliverystream/${self:custom.firehose.createDeliveryStreamName}"
+        - Fn::Join:
+            - ""
+            - - "arn:aws:firehose:"
+              - Ref: "AWS::Region"
+              - ":"
+              - Ref: "AWS::AccountId"
+              - ":deliverystream/${self:custom.firehose.updateDeliveryStreamName}"
+        - Fn::Join:
+            - ""
+            - - "arn:aws:firehose:"
+              - Ref: "AWS::Region"
+              - ":"
+              - Ref: "AWS::AccountId"
+              - ":deliverystream/${self:custom.firehose.deleteDeliveryStreamName}"
 
 package:
   exclude:
@@ -64,7 +88,9 @@ functions:
   dynamoStreamHandler:
     handler: bin/main
     environment:
-      STREAM_NAME: ${self:custom.firehose.deliveryStreamName}
+      CREATE_STREAM_NAME: ${self:custom.firehose.createDeliveryStreamName}
+      UPDATE_STREAM_NAME: ${self:custom.firehose.updateDeliveryStreamName}
+      DELETE_STREAM_NAME: ${self:custom.firehose.deleteDeliveryStreamName}
       DYNAMO_STREAM_ARN:
         Fn::GetAtt: [DynamoDBTable, StreamArn]
     events:
@@ -95,19 +121,53 @@ resources:
         StreamSpecification:
           StreamViewType: NEW_AND_OLD_IMAGES
     
-    KinesisFirehoseStream:
+    CreateKinesisFirehoseStream:
       Type: AWS::KinesisFirehose::DeliveryStream
       Properties:
-        DeliveryStreamName: ${self:custom.firehose.deliveryStreamName}
+        DeliveryStreamName: ${self:custom.firehose.createDeliveryStreamName}
         DeliveryStreamType: DirectPut
         ExtendedS3DestinationConfiguration: 
           BucketARN: arn:aws:s3:::${self:custom.s3.bucketName}
-          Prefix: ${self:custom.s3.path}
-          RoleARN: !GetAtt DeliveryRole.Arn 
+          Prefix: ${self:custom.firehose.prefix.create}
+          ErrorOutputPrefix: ${self:custom.firehose.errorPrefix.create}
+          RoleARN: !GetAtt DeliveryRole.Arn
           BufferingHints:
             IntervalInSeconds: ${self:custom.firehose.bufferInterval}
             SizeInMBs: ${self:custom.firehose.bufferSize}
-          CompressionFormat: GZIP
+#          CompressionFormat: GZIP
+          CompressionFormat: UNCOMPRESSED
+
+    UpdateKinesisFirehoseStream:
+      Type: AWS::KinesisFirehose::DeliveryStream
+      Properties:
+        DeliveryStreamName: ${self:custom.firehose.updateDeliveryStreamName}
+        DeliveryStreamType: DirectPut
+        ExtendedS3DestinationConfiguration:
+          BucketARN: arn:aws:s3:::${self:custom.s3.bucketName}
+          Prefix: ${self:custom.firehose.prefix.update}
+          ErrorOutputPrefix: ${self:custom.firehose.errorPrefix.update}
+          RoleARN: !GetAtt DeliveryRole.Arn
+          BufferingHints:
+            IntervalInSeconds: ${self:custom.firehose.bufferInterval}
+            SizeInMBs: ${self:custom.firehose.bufferSize}
+#          CompressionFormat: GZIP
+          CompressionFormat: UNCOMPRESSED
+
+    DeleteKinesisFirehoseStream:
+      Type: AWS::KinesisFirehose::DeliveryStream
+      Properties:
+        DeliveryStreamName: ${self:custom.firehose.deleteDeliveryStreamName}
+        DeliveryStreamType: DirectPut
+        ExtendedS3DestinationConfiguration:
+          BucketARN: arn:aws:s3:::${self:custom.s3.bucketName}
+          Prefix: ${self:custom.firehose.prefix.delete}
+          ErrorOutputPrefix: ${self:custom.firehose.errorPrefix.delete}
+          RoleARN: !GetAtt DeliveryRole.Arn
+          BufferingHints:
+            IntervalInSeconds: ${self:custom.firehose.bufferInterval}
+            SizeInMBs: ${self:custom.firehose.bufferSize}
+#          CompressionFormat: GZIP
+          CompressionFormat: UNCOMPRESSED
 
     DeliveryRole:
       Type: AWS::IAM::Role

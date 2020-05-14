@@ -21,20 +21,38 @@ const MaxRetries = 3
 var firehoseClient = initFirehoseClient()
 
 func handler(ctx context.Context, e events.DynamoDBEvent) {
-	var rs []firehose.Record
+	var insertRecords []firehose.Record
+	var modifyRecords []firehose.Record
+	var removeRecords []firehose.Record
 
 	for _, r := range e.Records {
-		rs = append(rs, firehose.Record{Data: eventsToByte(r)})
+		data := firehose.Record{Data: eventsToByte(r)}
+		switch r.EventName {
+		case "INSERT":
+			insertRecords = append(insertRecords, data)
+		case "MODIFY":
+			modifyRecords = append(modifyRecords, data)
+		case "REMOVE":
+			removeRecords = append(removeRecords, data)
+		}
 	}
 
-	if len(rs) == 0 {
+	batchRecords(ctx, os.Getenv("CREATE_STREAM_NAME"), insertRecords)
+	batchRecords(ctx, os.Getenv("UPDATE_STREAM_NAME"), modifyRecords)
+	batchRecords(ctx, os.Getenv("DELETE_STREAM_NAME"), removeRecords)
+
+	return
+}
+
+func batchRecords(ctx context.Context, streamName string, records []firehose.Record) bool {
+	if len(records) == 0 {
 		log.Println("empty event record. exiting...")
-		return
+		return true
 	}
 
 	req := firehoseClient.PutRecordBatchRequest(&firehose.PutRecordBatchInput{
-		Records:            rs,
-		DeliveryStreamName: aws.String(os.Getenv("STREAM_NAME")),
+		Records:            records,
+		DeliveryStreamName: aws.String(streamName),
 	})
 
 	out, err := req.Send(ctx)
@@ -45,21 +63,20 @@ func handler(ctx context.Context, e events.DynamoDBEvent) {
 
 	if *out.FailedPutCount == 0 {
 		log.Println("success!")
-		return
+		return true
 	}
 
-	// retry failed put records
-	if err := retry(ctx, out, rs); err != nil {
+	if err := retry(ctx, streamName, out, records); err != nil {
 		log.Panicln(err)
 	}
 
-	return
+	return false
 }
 
 func eventsToByte(r events.DynamoDBEventRecord) []byte {
 	var data []byte
 
-	data, err := json.Marshal(r.Change.NewImage)
+	data, err := json.Marshal(r.Change)
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -68,7 +85,7 @@ func eventsToByte(r events.DynamoDBEventRecord) []byte {
 	return data
 }
 
-func retry(ctx context.Context, out *firehose.PutRecordBatchResponse, rs []firehose.Record) error {
+func retry(ctx context.Context, streamName string, out *firehose.PutRecordBatchResponse, rs []firehose.Record) error {
 	retries := 0
 	retry := true
 
@@ -86,7 +103,7 @@ func retry(ctx context.Context, out *firehose.PutRecordBatchResponse, rs []fireh
 
 		req := firehoseClient.PutRecordBatchRequest(&firehose.PutRecordBatchInput{
 			Records:            retryRecords,
-			DeliveryStreamName: aws.String(os.Getenv("STREAM_NAME")),
+			DeliveryStreamName: aws.String(streamName),
 		})
 
 		out, err := req.Send(ctx)
